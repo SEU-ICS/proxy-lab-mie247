@@ -27,26 +27,16 @@ static sem_t mutex, w;
 static int readcnt,timestamp;
 
 
-void output_to_file(const char *format, ...) {
-    // 打开文件，使用追加模式("a")，这样多次调用不会覆盖之前的内容
-    // 如果希望每次运行时清空文件，可以使用写入模式("w")
-    FILE *file = fopen("output.txt", "a");
+void output_to_file(char* filename,const char *format, ...) {
+    FILE *file = fopen(filename, "a");
     if (file == NULL) {
         perror("Error opening output.txt");
         return;
     }
-    
-    // 使用可变参数处理
     va_list args;
     va_start(args, format);
-    
-    // 使用vfprintf将格式化输出写入文件
     vfprintf(file, format, args);
-    
-    // 清理可变参数
     va_end(args);
-    
-    // 关闭文件
     fclose(file);
 }
 
@@ -67,8 +57,10 @@ int query_cache(char *url, rio_t* rio_p) {
     }
     V(&mutex);
 
+    output_to_file("output.txt", "\n[-1]\n%s\n",url);
     int index = -1;
     for (int i = 0; i < cache_used;i++) {
+        output_to_file("output.txt", "\n[%d]\n%s\n", i ,cache[i].url);
         if (strcmp(cache[i].url, url)==0) {
             //若命中，更新时间戳
             P(&mutex);
@@ -78,7 +70,7 @@ int query_cache(char *url, rio_t* rio_p) {
             Rio_writen(rio_p->rio_fd, cache[i].content, cache[i].content_size);//直接在此处向客户端发送内容
             char *p=cache[i].content+ cache[i].content_size;
             p ='\0';
-            output_to_file("%s\n", cache[i].content);
+            output_to_file("output1.txt" ,"%s\n", cache[i].content);
             index = i;
             break;
         }
@@ -118,7 +110,9 @@ int add_cache(char *url, char *content, int content_size) {
         V(&mutex);
     }else{
         // 添加缓存
+        output_to_file("output.txt", "[ori_url]%s\n", url);
         strcpy(cache[cache_used].url, url);
+        output_to_file("output.txt", "[cac_url]%s\n", cache[cache_used].url);
         memcpy(cache[cache_used].content, content, content_size);
         cache[cache_used].content_size = content_size;
         // 更新时间戳
@@ -156,6 +150,7 @@ int parse_url(char *url, struct url_t *url_info){
         *pathp='/';
         *portp='\0';
         strcpy(url_info->host,hostp);
+        *portp=':';
     }
     strcpy(url_info->path,pathp);
     return 0;
@@ -212,6 +207,7 @@ void work(int clientfd){
     if(strcasecmp(method,"GET")!=0){// 不是GET请求，不处理
         return;
     }
+    output_to_file("output.txt", "[que_url]%s\n", url);
     if (query_cache(url, &client_rio)>=0) {//若命中缓存
         return;
     }
@@ -240,9 +236,9 @@ void work(int clientfd){
 
         char* p=buffer+resp_current;
         p='\0';
-        output_to_file("%s", buffer);
+        // output_to_file("output.txt", "%s", buffer);
     }
-    output_to_file("\n");
+    // output_to_file("output.txt","\n");
     //写入缓存
     if (resp_total < MAX_OBJECT_SIZE) {
         add_cache(url, resp_cache, resp_total);
@@ -261,7 +257,6 @@ void *thread(void *vargp) {
 int main(int argc,char **argv)
 {
     init_cache();
-    output_to_file("START\n");
 
     int listenfd, *connfdp;
     socklen_t clientlen;
